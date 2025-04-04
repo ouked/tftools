@@ -6,12 +6,13 @@ set -euo pipefail
 # Define your local modules here: "local_path:module_name"
 # The `module_name` must match the module block name in your Terraform files
 LOCAL_MODULES=(
-  "../module:module_block_name"
-  "../another_module:another_module"
+  "../module_dir_name:tf_module_name"
+#   "../another_module:another_module"
 )
 
-# Set workspace if
+# if needed
 # export TF_WORKSPACE=''
+
 
 MODULE_DEST_DIR="./.local_modules"
 
@@ -46,29 +47,48 @@ find . -maxdepth 1 -name "*.tf" | while read -r TF_FILE; do
 
     echo "  - Updating module \"$MODULE_NAME\" in $TF_FILE"
 
-    # Backup the file
+    # Backup original file
     cp "$TF_FILE" "$TF_FILE.bak"
 
-    # Replace in a temp file
     awk -v mod="$MODULE_NAME" -v path="$NEW_SOURCE" '
-      BEGIN { in_block=0 }
+      BEGIN { in_block=0; source_updated=0 }
       {
-        if ($0 ~ "module \"" mod "\"") in_block=1
-        if (in_block && $0 ~ /^[[:space:]]*source[[:space:]]*=/) {
-          print "# " $0
-          print "  source = \"" path "\""
+        if ($0 ~ "module \"" mod "\"") {
+          in_block=1
+          source_updated=0
+        }
+
+        if (in_block && $0 ~ /^[[:space:]]*source[[:space:]]*=[[:space:]]*\".*\"/) {
+          if ($0 ~ path) {
+            # Already updated; skip
+            source_updated = 1
+            print
+          } else {
+            # Comment out original source
+            print "# " $0
+            if (source_updated == 0) {
+              print "  source = \"" path "\""
+              source_updated = 1
+            }
+          }
           next
         }
+
         if (in_block && $0 ~ /^[[:space:]]*version[[:space:]]*=/) {
           print "# " $0
           next
         }
+
         print
-        if (in_block && $0 ~ /^[[:space:]]*}[[:space:]]*$/) in_block=0
+
+        if (in_block && $0 ~ /^[[:space:]]*}[[:space:]]*$/) {
+          in_block=0
+        }
       }
     ' "$TF_FILE.bak" > "$TF_FILE"
   done
 done
+
 
 # === Step 3: Run Terraform ===
 if [ "${SKIP_INIT:-false}" = false ]; then
